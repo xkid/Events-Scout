@@ -19,6 +19,7 @@ const getApiKey = () => {
 export const searchEventList = async (country: Country): Promise<Omit<EventData, 'companies' | 'id'>[]> => {
   const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
+  // Filter venues to only include those relevant to the requested country
   const venues = Object.values(Venue).filter(v => {
     if (country === Country.Thailand) return v.includes('Impact') || v.includes('BITEC') || v.includes('Queen Sirikit');
     if (country === Country.Malaysia) return v.includes('Kuala Lumpur') || v.includes('MITEC') || v.includes('SPICE') || v.includes('Penang');
@@ -75,7 +76,10 @@ export const searchEventList = async (country: Country): Promise<Omit<EventData,
     return rawData.map((item: any) => {
       // Heuristic to match string venue to Enum
       let matchedVenue = venues[0]; // Default
-      for (const v of Object.values(Venue)) {
+      
+      // CRITICAL FIX: Only iterate through the 'venues' valid for this country
+      // NOT Object.values(Venue), which would include other countries' venues (e.g. Manila vs Dubai WTC)
+      for (const v of venues) {
         if (item.venueName && item.venueName.toLowerCase().includes(v.toLowerCase().split(' ')[0])) {
           matchedVenue = v;
           break;
@@ -240,5 +244,53 @@ export const findExtendedExhibitors = async (eventName: string, venue: string, c
   } catch (error) {
     console.error(`Gemini Extended Search Error for ${eventName}:`, error);
     return [];
+  }
+};
+
+// Step 4: Draft Email Content
+export const draftEmailContent = async (eventName: string, venue: string, country: string, instructions: string): Promise<{ subject: string; body: string }> => {
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
+  const prompt = `
+    You are a professional business development manager.
+    Write a cold email draft regarding the event "${eventName}" which is held at ${venue}, ${country}.
+    
+    User Specific Instructions for the email content: "${instructions || "Write a general inquiry about exhibiting opportunities and booth pricing."}"
+    
+    Requirements:
+    - Tone: Professional, polite, and concise.
+    - Context: The user wants to contact participants or organizers of this event.
+    - Output: A JSON object with a subject line and the body text.
+    - Use placeholders like [Your Name] and [Your Company] where appropriate.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            subject: { type: Type.STRING, description: "The email subject line" },
+            body: { type: Type.STRING, description: "The email body text" }
+          },
+          required: ["subject", "body"]
+        }
+      }
+    });
+
+    const data = JSON.parse(response.text || "{}");
+    return {
+      subject: data.subject || `Inquiry: ${eventName}`,
+      body: data.body || "Could not generate draft."
+    };
+  } catch (error) {
+    console.error("Gemini Email Draft Error:", error);
+    return {
+      subject: `Inquiry regarding ${eventName}`,
+      body: `Dear Team,\n\nI am writing to inquire about ${eventName}.\n\nBest regards,\n[Your Name]`
+    };
   }
 };

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { ProgressBar } from './components/ProgressBar';
+import { EmailModal } from './components/EmailModal';
 import { Country, EventData } from './types';
 import { searchEventList, enrichEventDetails, findExtendedExhibitors } from './services/geminiService';
-import { Calendar, Users, Download, MapPin, Search, Mail, Phone, RefreshCw, Plus, ChevronDown, ChevronUp, Globe } from 'lucide-react';
+import { Calendar, Users, Download, MapPin, Search, Mail, Phone, RefreshCw, Plus, ChevronDown, ChevronUp, Globe, Send } from 'lucide-react';
 
 // Categorize countries by Continent
 const REGION_MAPPING: Record<string, Country[]> = {
@@ -54,6 +55,7 @@ const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'companies'>('calendar');
+  const [emailModalEvent, setEmailModalEvent] = useState<EventData | null>(null);
 
   // Load from local storage on mount
   useEffect(() => {
@@ -230,14 +232,30 @@ const App: React.FC = () => {
       }
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    // Use Blob instead of Data URI to handle large data and special characters (like Thai) correctly
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    // Add BOM (\uFEFF) for Excel to recognize UTF-8 encoding
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `${activeCountry}_Events_Full_Export.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleGenerateEmail = (event: EventData) => {
+    const hasEmails = event.companies.some(c => c.email && c.email.includes('@'));
+
+    if (!hasEmails) {
+      alert("No valid email addresses found for this event's participants.");
+      return;
+    }
+
+    setEmailModalEvent(event);
   };
 
   const filteredEvents = events.filter(e => e.country === activeCountry);
@@ -253,6 +271,14 @@ const App: React.FC = () => {
 
   return (
     <Layout>
+      {/* Email Modal */}
+      {emailModalEvent && (
+        <EmailModal 
+          event={emailModalEvent} 
+          onClose={() => setEmailModalEvent(null)} 
+        />
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-20 bg-ios-bg/80 backdrop-blur-md border-b border-ios-separator/50">
         <div className="px-4 pt-4 pb-2">
@@ -393,24 +419,38 @@ const App: React.FC = () => {
                       
                       {/* Exhibitor List in Card */}
                       <div className="mt-3 pt-3 border-t border-gray-100">
-                        <div className="flex justify-between items-center mb-2">
+                        <div className="flex justify-between items-center mb-2 gap-2">
                            <p className="text-xs font-medium text-gray-400 uppercase">
                               Participants ({event.companies.length})
                            </p>
-                           <button 
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               handleDeepSearchEvent(event);
-                             }}
-                             disabled={searchingId === event.id}
-                             className="text-xs flex items-center bg-ios-blue/10 text-ios-blue px-2 py-1 rounded-full font-medium active:bg-ios-blue/20 disabled:opacity-50"
-                           >
-                             {searchingId === event.id ? (
-                               <><RefreshCw size={10} className="animate-spin mr-1" /> Searching...</>
-                             ) : (
-                               <><Plus size={10} className="mr-1" /> Find More Exhibitors</>
-                             )}
-                           </button>
+                           <div className="flex gap-2">
+                              {event.companies.some(c => c.email) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleGenerateEmail(event);
+                                  }}
+                                  className="text-xs flex items-center bg-ios-green/10 text-ios-green px-2 py-1 rounded-full font-medium active:bg-ios-green/20 hover:bg-ios-green/20"
+                                  title="Draft email to all participants"
+                                >
+                                  <Mail size={10} className="mr-1" /> Email Gen
+                                </button>
+                              )}
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeepSearchEvent(event);
+                                }}
+                                disabled={searchingId === event.id}
+                                className="text-xs flex items-center bg-ios-blue/10 text-ios-blue px-2 py-1 rounded-full font-medium active:bg-ios-blue/20 disabled:opacity-50 hover:bg-ios-blue/20"
+                              >
+                                {searchingId === event.id ? (
+                                  <><RefreshCw size={10} className="animate-spin mr-1" /> Searching...</>
+                                ) : (
+                                  <><Plus size={10} className="mr-1" /> Find More Exhibitors</>
+                                )}
+                              </button>
+                           </div>
                         </div>
 
                         {event.companies.length > 0 ? (
@@ -462,13 +502,25 @@ const App: React.FC = () => {
                                     {event.isNew && <div className="w-2 h-2 rounded-full bg-ios-red flex-shrink-0" title="New Event"></div>}
                                   </div>
                                   <div className="text-xs text-gray-400 mt-1">{event.dateStart.split('-').slice(1).join('/')}</div>
-                                  <button 
-                                     onClick={() => handleDeepSearchEvent(event)}
-                                     disabled={searchingId === event.id}
-                                     className="mt-2 text-[10px] text-ios-blue bg-blue-50 px-2 py-1 rounded border border-blue-100 w-full text-center"
-                                  >
-                                    {searchingId === event.id ? 'Loading...' : '+ Load More'}
-                                  </button>
+                                  
+                                  <div className="flex flex-col gap-1 mt-2">
+                                     <button 
+                                       onClick={() => handleDeepSearchEvent(event)}
+                                       disabled={searchingId === event.id}
+                                       className="text-[10px] text-ios-blue bg-blue-50 px-2 py-1 rounded border border-blue-100 w-full text-center hover:bg-blue-100 transition-colors"
+                                     >
+                                       {searchingId === event.id ? 'Loading...' : '+ Load More'}
+                                     </button>
+                                     
+                                     {event.companies.some(c => c.email) && (
+                                       <button 
+                                         onClick={() => handleGenerateEmail(event)}
+                                         className="text-[10px] text-ios-green bg-green-50 px-2 py-1 rounded border border-green-100 w-full text-center flex items-center justify-center hover:bg-green-100 transition-colors"
+                                       >
+                                         <Mail size={10} className="mr-1" /> Email Gen
+                                       </button>
+                                     )}
+                                  </div>
                                 </div>
                               )}
                             </td>
@@ -505,7 +557,7 @@ const App: React.FC = () => {
                                <button 
                                      onClick={() => handleDeepSearchEvent(event)}
                                      disabled={searchingId === event.id}
-                                     className="mt-2 text-[10px] text-ios-blue bg-blue-50 px-2 py-1 rounded border border-blue-100 w-full text-center"
+                                     className="mt-2 text-[10px] text-ios-blue bg-blue-50 px-2 py-1 rounded border border-blue-100 w-full text-center hover:bg-blue-100"
                                   >
                                     {searchingId === event.id ? 'Loading...' : '+ Find Participants'}
                                   </button>
