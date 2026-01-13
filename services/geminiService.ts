@@ -8,10 +8,39 @@ const getYearRange = () => {
 };
 
 const getApiKey = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key not found in environment variables");
+  let apiKey = "";
+
+  // 1. Try Vite standard (Works for Netlify + Vite)
+  // Note: In Netlify, you MUST name the variable 'VITE_API_KEY' for it to be exposed to the browser.
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      apiKey = import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {
+    // Ignore errors if import.meta is not defined
   }
+
+  // 2. Try standard process.env (Works for Webpack/CRA or if defined in build config)
+  if (!apiKey) {
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        if (process.env.API_KEY) apiKey = process.env.API_KEY;
+        else if (process.env.VITE_API_KEY) apiKey = process.env.VITE_API_KEY;
+        else if (process.env.REACT_APP_API_KEY) apiKey = process.env.REACT_APP_API_KEY;
+      }
+    } catch (e) {
+      // Ignore ReferenceError if process is not defined in browser
+    }
+  }
+
+  if (!apiKey) {
+    console.error("CRITICAL ERROR: API Key is missing.");
+    console.error("For Netlify: Ensure you have set 'VITE_API_KEY' in Site Settings > Environment Variables.");
+    throw new Error("API Key not found. Please set VITE_API_KEY in your environment.");
+  }
+  
   return apiKey;
 };
 
